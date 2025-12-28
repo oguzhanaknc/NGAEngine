@@ -19,14 +19,17 @@ layout(buffer_reference, scalar) buffer VertexBufferRef {
     Vertex vertices[];
 };
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant, scalar) uniform PushConstants {
     VertexBufferRef vertex_ptr;
+    vec3 color;
+    float _pad;
+    vec2 offset;
+    mat2 transform;
 } pc;
 
 layout(location = 0) out vec3 outColor;
 
 void main() {
     Vertex v = pc.vertex_ptr.vertices[gl_VertexIndex];
-    gl_Position = vec4(v.pos, 0.0, 1.0);
-    outColor = v.color;
+    gl_Position = vec4(pc.transform * v.pos + pc.offset, 0.0, 1.0);
 }

@@ -2,6 +2,7 @@ package engine
 
 import "core:fmt"
 import "core:log"
+import "core:math/linalg/glsl"
 import "core:mem"
 import "core:os"
 import "vendor:glfw"
@@ -16,8 +17,15 @@ Vertex :: struct {
 
 // Push Constant (Shader'a yollayacağımız paket)
 PushConstantData :: struct {
-	vertex_buffer_addr: u64, // BDA Pointer'ı
+	vertex_buffer_addr: u64, // Offset: 0  | Size: 8
+	color:              [3]f32, // Offset: 8  | Size: 12
+	_pad:               f32, // Offset: 20 | Size: 4  <-- HİZALAMA İÇİN
+	offset:             [2]f32, // Offset: 24 | Size: 8
+	transform:          glsl.mat2,
 }
+
+@(private)
+frame_count: int = 0
 // --- GLOBAL DEĞİŞKENLER (Private) ---
 @(private)
 g_instance: vk.Instance
@@ -119,9 +127,12 @@ gfx_init_vulkan :: proc(window: glfw.WindowHandle) -> bool {
 	vertices := []Vertex {
 		// Pos (vec2)       // Color (vec3)       // Pad (f32)
 		{{0.0, -0.5}, {1.0, 0.0, 0.0}, 0.0}, // Üst - Kırmızı
-		{{0.5, 0.5}, {0.0, 1.0, 0.0}, 0.0}, // Sağ Alt - Yeşil
-		{{-0.5, 0.5}, {0.0, 0.0, 1.0}, 0.0}, // Sol Alt - Mavi
+		{{0.5, 0.5}, {1.0, 0.0, 0.0}, 0.0}, // Sağ Alt - Yeşil
+		{{-0.5, 0.5}, {1.0, 0.0, 0.0}, 0.0}, // Sol Alt - Mavi
 	}
+	triangle: Entity = create_entity()
+	triangle2: Entity = create_entity({0.5, 0}, {0, 1.0, 0.0})
+	triangle3: Entity = create_entity({0.8, 0}, {0, 0.0, 1.0})
 	g_vertex_buffer, g_vertex_mem, g_vertex_addr = create_buffer_with_data(
 		vertices,
 		{.STORAGE_BUFFER},
@@ -167,6 +178,7 @@ gfx_shutdown :: proc() {
 }
 
 gfx_render_frame :: proc() {
+	frame_count = (frame_count + 1) % 10000
 	frame := &g_frames[g_frame_index]
 
 	// 1. Bekle ve Resetle
@@ -233,19 +245,26 @@ gfx_render_frame :: proc() {
 
 	vk.CmdSetViewport(frame.cmd_buffer, 0, 1, &viewport)
 	vk.CmdSetScissor(frame.cmd_buffer, 0, 1, &scissor)
-	pc_data := PushConstantData {
-		vertex_buffer_addr = u64(g_vertex_addr),
+
+	for obj in g_world.transforms {
+		pc_data := PushConstantData {
+			vertex_buffer_addr = u64(g_vertex_addr),
+			offset             = obj.translation,
+			color              = obj.color,
+			transform          = obj.mat2,
+		}
+
+		vk.CmdPushConstants(
+			frame.cmd_buffer,
+			g_pipeline_layout,
+			{.VERTEX, .FRAGMENT},
+			0,
+			size_of(PushConstantData),
+			&pc_data,
+		)
+		// 4. Çiz (Hardcoded üçgen olduğu için 3 vertex istiyoruz)
+		vk.CmdDraw(frame.cmd_buffer, 3, 1, 0, 0)
 	}
-	vk.CmdPushConstants(
-		frame.cmd_buffer,
-		g_pipeline_layout,
-		{.VERTEX},
-		0,
-		size_of(PushConstantData),
-		&pc_data,
-	)
-	// 4. Çiz (Hardcoded üçgen olduğu için 3 vertex istiyoruz)
-	vk.CmdDraw(frame.cmd_buffer, 3, 1, 0, 0)
 
 	// 5. Çizimi Bitir
 	vk.CmdEndRendering(frame.cmd_buffer)
@@ -601,7 +620,7 @@ init_pipeline :: proc() {
 
 	// 2. Pipeline Layout (Push Constant Tanımı Burada!)
 	pc_range := vk.PushConstantRange {
-		stageFlags = {.VERTEX},
+		stageFlags = {.VERTEX, .FRAGMENT},
 		offset     = 0,
 		size       = size_of(PushConstantData), // u64 boyutunda (8 byte)
 	}
