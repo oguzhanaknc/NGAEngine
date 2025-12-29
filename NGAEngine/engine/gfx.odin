@@ -79,6 +79,15 @@ g_frame_index := 0
 // Core.odin buradan çağıracak
 gfx_init_vulkan :: proc(window: glfw.WindowHandle) -> bool {
 	// Vulkan fonksiyonlarını yükle
+	triangle: Entity = create_entity({-0.5,0})
+	set_scale(triangle, glsl.vec2{0.5, 0.5})
+	set_rotation_deg(triangle,0)
+	triangle2: Entity = create_entity({0,0},{0,1,0})
+	set_scale(triangle2, glsl.vec2{0.5, 0.5})
+	set_rotation_deg(triangle2,180)
+	triangle3: Entity = create_entity({0.5,0},{0,0,1})
+	set_scale(triangle3, glsl.vec2{0.5, 0.5})
+	set_rotation_deg(triangle3,0)
 	vk.load_proc_addresses(rawptr(glfw.GetInstanceProcAddress))
 	glfw_exts := glfw.GetRequiredInstanceExtensions()
 	layers := []cstring{"VK_LAYER_KHRONOS_validation"}
@@ -130,9 +139,7 @@ gfx_init_vulkan :: proc(window: glfw.WindowHandle) -> bool {
 		{{0.5, 0.5}, {1.0, 0.0, 0.0}, 0.0}, // Sağ Alt - Yeşil
 		{{-0.5, 0.5}, {1.0, 0.0, 0.0}, 0.0}, // Sol Alt - Mavi
 	}
-	triangle: Entity = create_entity()
-	triangle2: Entity = create_entity({0.5, 0}, {0, 1.0, 0.0})
-	triangle3: Entity = create_entity({0.8, 0}, {0, 0.0, 1.0})
+
 	g_vertex_buffer, g_vertex_mem, g_vertex_addr = create_buffer_with_data(
 		vertices,
 		{.STORAGE_BUFFER},
@@ -245,26 +252,52 @@ gfx_render_frame :: proc() {
 
 	vk.CmdSetViewport(frame.cmd_buffer, 0, 1, &viewport)
 	vk.CmdSetScissor(frame.cmd_buffer, 0, 1, &scissor)
+    rotation_speed: f32 = 1.0
+    dt: f32 = 0.00016
 
-	for obj in g_world.transforms {
-		pc_data := PushConstantData {
-			vertex_buffer_addr = u64(g_vertex_addr),
-			offset             = obj.translation,
-			color              = obj.color,
-			transform          = obj.mat2,
-		}
+    for i in 0..<len(g_world.transforms) {
 
-		vk.CmdPushConstants(
-			frame.cmd_buffer,
-			g_pipeline_layout,
-			{.VERTEX, .FRAGMENT},
-			0,
-			size_of(PushConstantData),
-			&pc_data,
-		)
-		// 4. Çiz (Hardcoded üçgen olduğu için 3 vertex istiyoruz)
-		vk.CmdDraw(frame.cmd_buffer, 3, 1, 0, 0)
-	}
+            // --- 1. UPDATE (GÜNCELLEME) ---
+
+            e := Entity(i) // Basit sistemimizde indeks = Entity ID
+
+            // Mevcut rotasyonu okuyup artırıyoruz
+            current_rot := g_world.transforms[i].rotation
+
+            // Her nesneyi farklı yöne veya hıza döndürmek için ufak bir numara:
+            // Çift indeksler saat yönüne, tekler tersine dönsün
+            dir: f32 = (i % 2 == 0) ? 1.0 : -1.0
+
+            new_rot := current_rot + (rotation_speed * dir * dt)
+
+            // Daha önce yazdığımız fonksiyonu çağırıyoruz.
+            // Bu fonksiyon 'rotation'ı günceller VE 'mat2'yi yeniden hesaplar.
+            set_rotation(e, new_rot)
+
+
+            // --- 2. RENDER (ÇİZİM) ---
+
+            // Güncellenmiş veriyi SOA dizisinden tekrar çekiyoruz
+            obj := g_world.transforms[i]
+
+            pc_data := PushConstantData {
+                vertex_buffer_addr = u64(g_vertex_addr),
+                offset             = obj.translation,
+                color              = obj.color,
+                transform          = obj.mat2, // set_rotation sayesinde güncel matris
+            }
+
+            vk.CmdPushConstants(
+                frame.cmd_buffer,
+                g_pipeline_layout,
+                {.VERTEX, .FRAGMENT},
+                0,
+                size_of(PushConstantData),
+                &pc_data,
+            )
+
+            vk.CmdDraw(frame.cmd_buffer, 3, 1, 0, 0)
+        }
 
 	// 5. Çizimi Bitir
 	vk.CmdEndRendering(frame.cmd_buffer)
